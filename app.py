@@ -271,9 +271,6 @@ with tab1:
 
     col3, col4 = st.columns(2)
     with col3:
-        st.session_state.pr_person = st.text_input(
-            "홍보", value=st.session_state.pr_person
-        )
         st.session_state.sponsors = st.text_input(
             "후원", value=st.session_state.sponsors,
             placeholder="예: 한국문화예술위원회"
@@ -287,12 +284,7 @@ with tab1:
             "전시 일수", min_value=0, value=st.session_state.exhibition_days,
             placeholder="예: 52", help="시작일~종료일 기준 자동 계산. 휴관일 제외 시 직접 수정하세요."
         )
-        st.session_state.total_budget_overview = st.text_input(
-            "총 사용 예산", value=st.session_state.total_budget_overview,
-            placeholder="예: 약 1억 4천 2백만 원(142,438,012원)"
-        )
-
-    col_b1, col_b2 = st.columns(2)
+    col_b1, col_b2, col_b3 = st.columns(3)
     with col_b1:
         st.session_state.budget_exhibition = st.text_input(
             "전시 사용 예산", value=st.session_state.budget_exhibition,
@@ -302,6 +294,22 @@ with tab1:
         st.session_state.budget_supplementary = st.text_input(
             "부대 사용 예산", value=st.session_state.budget_supplementary,
             placeholder="예: 11,665,000원"
+        )
+    with col_b3:
+        # 총 사용 예산: 전시 + 부대 자동 합산
+        def _parse_budget(s):
+            if not s:
+                return 0
+            s = str(s).replace(",", "").replace("원", "").replace("약 ", "").strip()
+            try:
+                return int(s)
+            except ValueError:
+                return 0
+        _budget_sum = _parse_budget(st.session_state.budget_exhibition) + _parse_budget(st.session_state.budget_supplementary)
+        if _budget_sum > 0:
+            st.session_state.total_budget_overview = f"{_budget_sum:,}원"
+        st.text_input(
+            "총 사용 예산 (자동 산출)", value=st.session_state.total_budget_overview, disabled=True
         )
 
     col5, col6, col7 = st.columns(3)
@@ -347,7 +355,7 @@ with tab1:
             placeholder="예: 7,009명"
         )
     with col9:
-        # 일평균 관객수 자동 산출
+        # 일평균 관객 수 자동 산출
         auto_daily = ""
         visitor_str = st.session_state.visitor_count.replace("명", "").replace(",", "").strip()
         try:
@@ -357,33 +365,29 @@ with tab1:
                 auto_daily = f"{visitor_num // days_num}명"
         except ValueError:
             auto_daily = ""
-        st.text_input("일평균 관객수 (자동 산출)", value=auto_daily, disabled=True)
+        st.text_input("일평균 관객 수 (자동 산출)", value=auto_daily, disabled=True)
 
-    # A3: 프로그램 개요 자동 생성 (탭3 데이터 기반)
+    # 프로그램: 전시 구성 탭 데이터에서 자동 생성
     _progs = st.session_state.related_programs
     _valid_progs = [p for p in _progs if p.get("category", "").strip() or p.get("title", "").strip()]
-    if _valid_progs and not st.session_state.programs_overview:
-        _total_part = 0
-        _cat_counts = {}
-        for p in _valid_progs:
-            cat = p.get("category", "").strip() or p.get("title", "").strip()
-            _cat_counts[cat] = _cat_counts.get(cat, 0) + 1
-            try:
-                _total_part += int(str(p.get("participants", "0")).replace(",", "").replace("명", "").strip() or "0")
-            except ValueError:
-                pass
+    _total_part = 0
+    _cat_counts = {}
+    for p in _valid_progs:
+        cat = p.get("category", "").strip() or p.get("title", "").strip()
+        _cat_counts[cat] = _cat_counts.get(cat, 0) + 1
+        try:
+            _total_part += int(str(p.get("participants", "0")).replace(",", "").replace("명", "").strip() or "0")
+        except ValueError:
+            pass
+    if _cat_counts:
         _cat_strs = [f"{cat} {cnt}회" for cat, cnt in _cat_counts.items()]
-        _auto_prog = ", ".join(_cat_strs)
+        _auto_prog = f"총 {len(_valid_progs)}개 프로그램: " + ", ".join(_cat_strs)
         if _total_part > 0:
             _auto_prog += f" ({_total_part:,}명 참여)"
         st.session_state.programs_overview = _auto_prog
 
-    st.session_state.programs_overview = st.text_area(
-        "프로그램 (개요)",
-        value=st.session_state.programs_overview,
-        placeholder="예: 아티스트 토크 2회, 큐레이터 투어 3회, 워크숍 1회",
-        height=80,
-        help="전시 구성 탭의 프로그램 데이터에서 자동 생성됩니다. 직접 수정도 가능합니다."
+    st.text_input(
+        "프로그램 (자동 산출)", value=st.session_state.programs_overview, disabled=True
     )
 
     st.markdown("**포스터 이미지** (목차 페이지에 표시됨)")
@@ -592,6 +596,16 @@ with tab3:
 with tab4:
     st.markdown('<div class="section-header">Ⅳ. 전시 결과</div>', unsafe_allow_html=True)
 
+    def _parse_amount(s):
+        """금액 문자열에서 숫자 추출 (예: '42,574,000원' → 42574000)"""
+        if not s:
+            return 0
+        s = str(s).replace(",", "").replace("원", "").replace("약 ", "").strip()
+        try:
+            return int(s)
+        except ValueError:
+            return 0
+
     # ── 기본 정보 탭 → 예산/관객 탭 자동 동기화 ──
     if st.session_state.total_budget_overview:
         st.session_state.budget_total_spent = st.session_state.total_budget_overview
@@ -621,9 +635,8 @@ with tab4:
     # ── 예산 ──
     st.subheader("1. 예산 및 지출")
 
-    st.session_state.budget_total_spent = st.text_input(
-        "지출 총액", value=st.session_state.budget_total_spent,
-        placeholder="예: 약 1억 4천 2백만 원(142,438,012원)"
+    st.text_input(
+        "지출 총액 (자동 산출)", value=st.session_state.budget_total_spent, disabled=True
     )
 
     st.markdown("**지출 구성 설명** (- 불릿으로 표시됨)")
@@ -752,40 +765,31 @@ with tab4:
 
     col_rev1, col_rev2 = st.columns(2)
     with col_rev1:
-        st.session_state.revenue_visitors = st.text_input(
-            "총 관객 수", value=st.session_state.revenue_visitors, placeholder="예: 7,009명"
+        st.text_input(
+            "총 관객 수 (자동 산출)", value=st.session_state.revenue_visitors, disabled=True
         )
-        st.session_state.revenue_daily_average = st.text_input(
-            "일평균 관객", value=st.session_state.revenue_daily_average, placeholder="예: 135명"
+        st.text_input(
+            "일평균 관객 (자동 산출)", value=st.session_state.revenue_daily_average, disabled=True
         )
         st.session_state.revenue_ticket = st.text_input(
             "입장 수입", value=st.session_state.revenue_ticket, placeholder="예: 42,574,000원"
         )
     with col_rev2:
-        st.session_state.revenue_total = st.text_input(
-            "총 수입", value=st.session_state.revenue_total, placeholder="예: 49,574,000원"
-        )
         st.session_state.revenue_partnership = st.text_input(
             "제휴 수입", value=st.session_state.revenue_partnership
         )
 
     # A5: 총수입 ← 입장수입 + 제휴수입 자동 합산
-    def _parse_amount(s):
-        if not s:
-            return 0
-        s = str(s).replace(",", "").replace("원", "").replace("약 ", "").strip()
-        try:
-            return int(s)
-        except ValueError:
-            return 0
     _ticket_rev = _parse_amount(st.session_state.revenue_ticket)
     _partner_rev = _parse_amount(st.session_state.revenue_partnership)
     if _ticket_rev > 0 or _partner_rev > 0:
         _rev_sum = _ticket_rev + _partner_rev
-        _auto_rev = f"{_rev_sum:,}원"
-        if not st.session_state.revenue_total or st.session_state.revenue_total == st.session_state.total_revenue_overview:
-            st.session_state.revenue_total = _auto_rev
-            st.session_state.total_revenue_overview = _auto_rev
+        st.session_state.revenue_total = f"{_rev_sum:,}원"
+        st.session_state.total_revenue_overview = st.session_state.revenue_total
+
+    st.text_input(
+        "총 수입 (자동 산출)", value=st.session_state.revenue_total, disabled=True
+    )
 
     st.markdown("**관객 수 관련 메모** (- 불릿으로 표시됨)")
     for i, note in enumerate(st.session_state.revenue_visitor_notes):
@@ -925,7 +929,7 @@ with tab4:
             elif week in st.session_state.weekly_visitors:
                 del st.session_state.weekly_visitors[week]
 
-    # B6: 주별 관객수 합계 검증
+    # B6: 주별 관객 수 합계 검증
     if st.session_state.weekly_visitors:
         _weekly_sum = sum(st.session_state.weekly_visitors.values())
         if _ticket_sum > 0 and _weekly_sum != _ticket_sum:
@@ -1198,7 +1202,7 @@ def collect_data():
     except ValueError:
         staff_overview = ""
 
-    # 일평균 관객수 자동 산출
+    # 일평균 관객 수 자동 산출
     auto_daily_avg = ""
     v_str = st.session_state.visitor_count.replace("명", "").replace(",", "").strip()
     try:
