@@ -276,10 +276,12 @@ with tab1:
             placeholder="예: 한국문화예술위원회"
         )
     with col4:
-        # 전시 일수: 날짜에서 자동 계산, 수동 수정 가능
+        # 전시 일수: 날짜에서 자동 계산, 날짜 변경 시 재계산, 수동 수정 가능
         _auto_days = (st.session_state.period_end - st.session_state.period_start).days + 1
-        if _auto_days > 0 and st.session_state.exhibition_days == 0:
+        _prev_auto = st.session_state.get('_prev_auto_days', 0)
+        if _auto_days > 0 and (_prev_auto != _auto_days or st.session_state.exhibition_days == 0):
             st.session_state.exhibition_days = _auto_days
+            st.session_state._prev_auto_days = _auto_days
         st.session_state.exhibition_days = st.number_input(
             "전시 일수", min_value=0, value=st.session_state.exhibition_days,
             placeholder="예: 52", help="시작일~종료일 기준 자동 계산. 휴관일 제외 시 직접 수정하세요."
@@ -420,6 +422,12 @@ with tab2:
 
 with tab3:
     st.markdown('<div class="section-header">Ⅲ. 전시 구성</div>', unsafe_allow_html=True)
+
+    # ── 기본 정보 탭 → 전시 구성 탭 자동 동기화 ──
+    if st.session_state.staff_paid_count:
+        st.session_state.staff_main_count = st.session_state.staff_paid_count
+    if st.session_state.staff_volunteer_count:
+        st.session_state.staff_volunteers_count = st.session_state.staff_volunteer_count
 
     # ── 전시실 ──
     st.subheader("1. 전시 (전시실별 정보)")
@@ -622,6 +630,7 @@ with tab4:
         except (ValueError, TypeError):
             pass
     # 지출 구성 텍스트 자동 생성
+    _auto_breakdown = ""
     if st.session_state.budget_exhibition or st.session_state.budget_supplementary:
         _parts = []
         if st.session_state.budget_exhibition:
@@ -629,8 +638,7 @@ with tab4:
         if st.session_state.budget_supplementary:
             _parts.append(f"부대비 {st.session_state.budget_supplementary}")
         _auto_breakdown = f"지출 구성: {' / '.join(_parts)}"
-        if not st.session_state.budget_breakdown_notes[0]:
-            st.session_state.budget_breakdown_notes[0] = _auto_breakdown
+        st.session_state.budget_breakdown_notes[0] = _auto_breakdown
 
     # ── 예산 ──
     st.subheader("1. 예산 및 지출")
@@ -643,11 +651,17 @@ with tab4:
     for i, note in enumerate(st.session_state.budget_breakdown_notes):
         cols = st.columns([10, 1])
         with cols[0]:
-            st.session_state.budget_breakdown_notes[i] = st.text_input(
-                f"구성 {i+1}", value=note, key=f"bdn_{i}",
-                label_visibility="collapsed",
-                placeholder="예: 지출 구성: 전시비 130,773,012원 / 부대비 11,665,000원"
-            )
+            if i == 0 and _auto_breakdown:
+                st.text_input(
+                    "구성 1 (자동 산출)", value=note, key=f"bdn_{i}",
+                    label_visibility="collapsed", disabled=True
+                )
+            else:
+                st.session_state.budget_breakdown_notes[i] = st.text_input(
+                    f"구성 {i+1}", value=note, key=f"bdn_{i}",
+                    label_visibility="collapsed",
+                    placeholder="예: 추가 지출 구성 설명"
+                )
         with cols[1]:
             if i > 0 and st.button("🗑️", key=f"del_bdn_{i}"):
                 st.session_state.budget_breakdown_notes.pop(i)
