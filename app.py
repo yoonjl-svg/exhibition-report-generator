@@ -250,6 +250,10 @@ with tab1:
             placeholder="예: 작가A, 작가B, 작가C",
             height=80
         )
+        # B8: 참여 작가 수 자동 표시
+        _artist_list = [a.strip() for a in st.session_state.artists.split(",") if a.strip()]
+        if _artist_list:
+            st.caption(f"입력된 작가: {len(_artist_list)}명")
 
     with col2:
         st.session_state.chief_curator = st.text_input(
@@ -275,9 +279,13 @@ with tab1:
             placeholder="예: 한국문화예술위원회"
         )
     with col4:
+        # 전시 일수: 날짜에서 자동 계산, 수동 수정 가능
+        _auto_days = (st.session_state.period_end - st.session_state.period_start).days + 1
+        if _auto_days > 0 and st.session_state.exhibition_days == 0:
+            st.session_state.exhibition_days = _auto_days
         st.session_state.exhibition_days = st.number_input(
             "전시 일수", min_value=0, value=st.session_state.exhibition_days,
-            placeholder="예: 52"
+            placeholder="예: 52", help="시작일~종료일 기준 자동 계산. 휴관일 제외 시 직접 수정하세요."
         )
         st.session_state.total_budget_overview = st.text_input(
             "총 사용 예산", value=st.session_state.total_budget_overview,
@@ -351,11 +359,31 @@ with tab1:
             auto_daily = ""
         st.text_input("일평균 관객수 (자동 산출)", value=auto_daily, disabled=True)
 
+    # A3: 프로그램 개요 자동 생성 (탭3 데이터 기반)
+    _progs = st.session_state.related_programs
+    _valid_progs = [p for p in _progs if p.get("category", "").strip() or p.get("title", "").strip()]
+    if _valid_progs and not st.session_state.programs_overview:
+        _total_part = 0
+        _cat_counts = {}
+        for p in _valid_progs:
+            cat = p.get("category", "").strip() or p.get("title", "").strip()
+            _cat_counts[cat] = _cat_counts.get(cat, 0) + 1
+            try:
+                _total_part += int(str(p.get("participants", "0")).replace(",", "").replace("명", "").strip() or "0")
+            except ValueError:
+                pass
+        _cat_strs = [f"{cat} {cnt}회" for cat, cnt in _cat_counts.items()]
+        _auto_prog = ", ".join(_cat_strs)
+        if _total_part > 0:
+            _auto_prog += f" ({_total_part:,}명 참여)"
+        st.session_state.programs_overview = _auto_prog
+
     st.session_state.programs_overview = st.text_area(
         "프로그램 (개요)",
         value=st.session_state.programs_overview,
         placeholder="예: 아티스트 토크 2회, 큐레이터 투어 3회, 워크숍 1회",
-        height=80
+        height=80,
+        help="전시 구성 탭의 프로그램 데이터에서 자동 생성됩니다. 직접 수정도 가능합니다."
     )
 
     st.markdown("**포스터 이미지** (목차 페이지에 표시됨)")
@@ -564,6 +592,32 @@ with tab3:
 with tab4:
     st.markdown('<div class="section-header">Ⅳ. 전시 결과</div>', unsafe_allow_html=True)
 
+    # ── 기본 정보 탭 → 예산/관객 탭 자동 동기화 ──
+    if st.session_state.total_budget_overview:
+        st.session_state.budget_total_spent = st.session_state.total_budget_overview
+    if st.session_state.visitor_count:
+        st.session_state.revenue_visitors = st.session_state.visitor_count
+    if st.session_state.total_revenue_overview:
+        st.session_state.revenue_total = st.session_state.total_revenue_overview
+    if st.session_state.visitor_count and st.session_state.exhibition_days:
+        try:
+            _v = int(st.session_state.visitor_count.replace("명", "").replace(",", "").strip())
+            _d = int(st.session_state.exhibition_days)
+            if _v > 0 and _d > 0:
+                st.session_state.revenue_daily_average = f"{_v // _d}명"
+        except (ValueError, TypeError):
+            pass
+    # 지출 구성 텍스트 자동 생성
+    if st.session_state.budget_exhibition or st.session_state.budget_supplementary:
+        _parts = []
+        if st.session_state.budget_exhibition:
+            _parts.append(f"전시비 {st.session_state.budget_exhibition}")
+        if st.session_state.budget_supplementary:
+            _parts.append(f"부대비 {st.session_state.budget_supplementary}")
+        _auto_breakdown = f"지출 구성: {' / '.join(_parts)}"
+        if not st.session_state.budget_breakdown_notes[0]:
+            st.session_state.budget_breakdown_notes[0] = _auto_breakdown
+
     # ── 예산 ──
     st.subheader("1. 예산 및 지출")
 
@@ -619,6 +673,23 @@ with tab4:
     if st.button("➕ 예산 항목 추가 (요약)"):
         add_item("budget_summary", {"category": "", "planned": "", "actual": "", "note": ""})
         st.rerun()
+
+    # B10: 예산 차트 라이브 미리보기
+    _chart_cats, _chart_planned, _chart_actual = [], [], []
+    for item in st.session_state.budget_summary:
+        cat = item.get("category", "").strip()
+        if cat:
+            _p = _parse_amount(item.get("planned", ""))
+            _a = _parse_amount(item.get("actual", ""))
+            if _p > 0 or _a > 0:
+                _chart_cats.append(cat)
+                _chart_planned.append(_p)
+                _chart_actual.append(_a)
+    if _chart_cats:
+        from chart_generator import create_budget_comparison_chart
+        _chart_path = create_budget_comparison_chart(_chart_cats, _chart_planned, _chart_actual)
+        st.image(_chart_path, width=500)
+        os.remove(_chart_path)
 
     st.markdown("**상세 예산 집행 내역**")
     for i, item in enumerate(st.session_state.budget_details):
@@ -698,6 +769,24 @@ with tab4:
             "제휴 수입", value=st.session_state.revenue_partnership
         )
 
+    # A5: 총수입 ← 입장수입 + 제휴수입 자동 합산
+    def _parse_amount(s):
+        if not s:
+            return 0
+        s = str(s).replace(",", "").replace("원", "").replace("약 ", "").strip()
+        try:
+            return int(s)
+        except ValueError:
+            return 0
+    _ticket_rev = _parse_amount(st.session_state.revenue_ticket)
+    _partner_rev = _parse_amount(st.session_state.revenue_partnership)
+    if _ticket_rev > 0 or _partner_rev > 0:
+        _rev_sum = _ticket_rev + _partner_rev
+        _auto_rev = f"{_rev_sum:,}원"
+        if not st.session_state.revenue_total or st.session_state.revenue_total == st.session_state.total_revenue_overview:
+            st.session_state.revenue_total = _auto_rev
+            st.session_state.total_revenue_overview = _auto_rev
+
     st.markdown("**관객 수 관련 메모** (- 불릿으로 표시됨)")
     for i, note in enumerate(st.session_state.revenue_visitor_notes):
         cols = st.columns([10, 1])
@@ -755,6 +844,15 @@ with tab4:
     with col_v5:
         st.session_state.visitor_discount = st.number_input("기타 할인 (명)", min_value=0, value=st.session_state.visitor_discount, key="v_discount")
 
+    # A4: 입장권별 합산 → 관객 수 자동 반영
+    _ticket_sum = (st.session_state.visitor_general + st.session_state.visitor_student
+                   + st.session_state.visitor_invitation + st.session_state.visitor_artpass
+                   + st.session_state.visitor_discount)
+    if _ticket_sum > 0:
+        st.session_state.visitor_count = f"{_ticket_sum:,}명"
+        st.session_state.revenue_visitors = st.session_state.visitor_count
+        st.caption(f"입장권별 합계: {_ticket_sum:,}명 → 관객 수에 반영됨")
+
     # 파이차트 미리보기
     ticket_data = {}
     if st.session_state.visitor_general > 0:
@@ -802,6 +900,12 @@ with tab4:
     with col_t4:
         st.session_state.vtype_opening = st.number_input("오프닝 리셉션 (명)", min_value=0, value=st.session_state.vtype_opening, key="vt_open")
 
+    # B7: 유형별 관객 합계 검증
+    _vtype_sum = (st.session_state.vtype_individual + st.session_state.vtype_art_univ
+                  + st.session_state.vtype_other_group + st.session_state.vtype_opening)
+    if _vtype_sum > 0 and _ticket_sum > 0 and _vtype_sum != _ticket_sum:
+        st.warning(f"유형별 합계({_vtype_sum:,}명)와 입장권별 합계({_ticket_sum:,}명)가 다릅니다.")
+
     st.markdown("**주별 관객 수**")
     st.info("전시 기간에 해당하는 주의 관객 수를 입력하세요.")
 
@@ -820,6 +924,14 @@ with tab4:
                 st.session_state.weekly_visitors[week] = val
             elif week in st.session_state.weekly_visitors:
                 del st.session_state.weekly_visitors[week]
+
+    # B6: 주별 관객수 합계 검증
+    if st.session_state.weekly_visitors:
+        _weekly_sum = sum(st.session_state.weekly_visitors.values())
+        if _ticket_sum > 0 and _weekly_sum != _ticket_sum:
+            st.warning(f"주별 합계({_weekly_sum:,}명)와 입장권별 합계({_ticket_sum:,}명)가 다릅니다.")
+        elif _weekly_sum > 0:
+            st.caption(f"주별 합계: {_weekly_sum:,}명")
 
     # 주별 바 차트 미리보기
     if st.session_state.weekly_visitors:
@@ -931,6 +1043,12 @@ with tab5:
     if st.button("➕ 온라인 매체 추가"):
         add_item("press_online", {"outlet": "", "date": "", "title": "", "url": ""})
         st.rerun()
+
+    # B9: 보도 건수 합계 표시
+    _print_count = len([p for p in st.session_state.press_print if p.get("outlet", "").strip()])
+    _online_count = len([p for p in st.session_state.press_online if p.get("outlet", "").strip()])
+    if _print_count > 0 or _online_count > 0:
+        st.caption(f"총 보도 건수: {_print_count + _online_count}건 (일간지/월간지 {_print_count}건 + 온라인 {_online_count}건)")
 
     st.divider()
 
