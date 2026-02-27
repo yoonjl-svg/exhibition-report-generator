@@ -55,11 +55,12 @@ class ExhibitionReportGenerator:
         add_page_break(self.doc)
 
         self._section_4_results()
-        add_page_break(self.doc)
 
-        self._section_5_promotion()
-        add_page_break(self.doc)
+        if self._has_promotion_data():
+            add_page_break(self.doc)
+            self._section_5_promotion()
 
+        add_page_break(self.doc)
         self._section_6_evaluation()
 
         # 보고서 끝 표기
@@ -521,6 +522,16 @@ class ExhibitionReportGenerator:
     # ══════════════════════════════════════════
     # V. 홍보 방식 및 언론 보도
     # ══════════════════════════════════════════
+
+    def _has_promotion_data(self):
+        """홍보 섹션에 출력할 데이터가 있는지 확인"""
+        promo = self.data.get("promotion", {})
+        has_promo = any(promo.get(k, "") for k in ["advertising", "press_release", "web_invitation", "newsletter", "sns", "other"])
+        press = self.data.get("press_coverage", {})
+        has_press = bool(press.get("print_media")) or bool(press.get("online_media"))
+        has_membership = bool(self.data.get("membership", ""))
+        has_promo_photos = bool([p for p in self.data.get("promotion_photos", []) if os.path.exists(p)])
+        return has_promo or has_press or has_membership or has_promo_photos
 
     def _section_5_promotion(self):
         """V. 홍보 방식 및 언론 보도"""
